@@ -1,107 +1,178 @@
-# app.py
 import streamlit as st
 import pandas as pd
-import joblib
-from sklearn.datasets import load_breast_cancer # To get feature names and target names
+import numpy as np
+import pickle
+import shap
+import matplotlib.pyplot as plt
+from PIL import Image
+import io 
 
-# --- Load the trained model ---
-# Ensure 'decision_tree_model.joblib' is in the same directory as app.py
-# This model was created by running model_training.py
-try:
-    model = joblib.load('decision_tree_model.joblib')
-except FileNotFoundError:
-    st.error("Error: Model file 'decision_tree_model.joblib' not found.")
-    st.error("Please ensure you have run 'model_training.py' to create the model file.")
-    st.stop() # Stop the app if model is not found
+# Set PIL's max image pixels to None to prevent DecompressionBombError
+Image.MAX_IMAGE_PIXELS = None 
 
-# --- Get feature names and target names ---
-# This ensures consistency with how the model was trained
-cancer_data = load_breast_cancer()
-feature_names = cancer_data.feature_names
-target_names = cancer_data.target_names # 0: malignant, 1: benign
+# --- 1. Load Model and Preprocessors ---
+@st.cache_resource # Cache the model loading for performance
+def load_model_and_assets():
+    try:
+        model = pickle.load(open("breast_cancer_early_signs_model.pkl", "rb"))
+        with open("model_columns.pkl", "rb") as f:
+            expected_input_columns_after_ohe = pickle.load(f)
+        
+        # --- CRITICAL: Load SHAP background data ---
+        # This file must contain a preprocessed sample of your training data
+        with open("shap_background_data.pkl", "rb") as f:
+            shap_background_data = pickle.load(f)
+        
+        return model, expected_input_columns_after_ohe, shap_background_data
+    except FileNotFoundError as e:
+        st.error(f"Error loading model or required files: {e}. Please ensure 'breast_cancer_early_signs_model.pkl', 'model_columns.pkl', AND 'shap_background_data.pkl' are in the same directory.")
+        st.stop() # Stop the app if crucial files are missing
 
-# --- Streamlit UI Configuration ---
-st.set_page_config(
-    page_title="Breast Cancer Prediction App",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- Unpack the loaded assets, including the new shap_background_data ---
+model, expected_input_columns_after_ohe, shap_background_data = load_model_and_assets()
 
-# --- App Title and Description ---
-st.title("🔬 Breast Cancer Prediction App")
-st.markdown("""
-This application predicts whether a breast mass is **Malignant** or **Benign**
-based on various diagnostic measurements.
+# --- Define Features (ensure these match your training data's structure) ---
+NUMERICAL_FEATURES = [
+    'mean radius', 'mean texture', 'mean perimeter', 'mean area',
+    'mean smoothness', 'mean compactness', 'mean concavity',
+    'mean concave points', 'mean symmetry', 'mean fractal dimension',
+    'radius error', 'texture error', 'perimeter error', 'area error',
+    'smoothness error', 'compactness error', 'concavity error',
+    'concave points error', 'symmetry error', 'fractal dimension error',
+    'worst radius', 'worst texture', 'worst perimeter', 'worst area',
+    'worst smoothness', 'worst compactness', 'worst concavity',
+    'worst concave points', 'worst symmetry', 'worst fractal dimension'
+]
 
-**Please input the values for the patient's features in the sidebar.**
-""")
+CATEGORICAL_FEATURES_INFO = {
+    'family_history_breast_cancer': ['No', 'Yes'],
+    'menopause_status': ['Post', 'Pre'],
+    'alcohol_intake_per_week': ['Heavy', 'Light', 'Moderate', 'nan'],
+    'physical_activity_level': ['Active', 'Moderate', 'Sedentary'],
+    'nipple_discharge': ['No', 'Yes'],
+    'palpable_lump': ['No', 'Yes'],
+    'localized_breast_pain': ['No', 'Yes']
+}
 
-st.markdown("---")
+# --- Streamlit UI ---
+st.title("🩺 Breast Cancer Early Signs Prediction")
+st.header("Enter Patient Information")
+user_input_raw = {}
 
-# --- Sidebar for Input Features ---
-st.sidebar.header("Input Patient Data (Feature Values)")
-st.sidebar.markdown("Adjust the sliders below to enter the measurements for the patient.")
+st.subheader("Numerical Features") 
+for feature in NUMERICAL_FEATURES:
+    # Set default values and ranges as appropriate for your data
+    if 'radius' in feature or 'perimeter' in feature or 'area' in feature or 'size' in feature:
+        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", min_value=0.0, max_value=100.0, value=5.0, key=f"num_{feature}")
+    elif 'texture' in feature or 'smoothness' in feature or 'compactness' in feature or 'concavity' in feature or 'symmetry' in feature or 'fractal dimension' in feature:
+        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", min_value=0.0, max_value=1.0, value=0.1, format="%.4f", key=f"num_{feature}")
+    else:
+        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", value=0.0, key=f"num_{feature}")
 
-input_data = {}
-# Create input fields for each feature in the sidebar
-# We'll default the value to the mean of each feature from the original dataset
-# for a sensible starting point.
-for i, feature in enumerate(feature_names):
-    # Determine min, max, and step for sliders based on dataset characteristics
-    # This makes the sliders more practical
-    min_val = float(cancer_data.data[:, i].min())
-    max_val = float(cancer_data.data[:, i].max())
-    mean_val = float(cancer_data.data[:, i].mean())
+st.subheader("Categorical Features") 
+for feature, categories in CATEGORICAL_FEATURES_INFO.items():
+    if len(categories) == 2 and 'Yes' in categories and 'No' in categories: 
+        checkbox_value = st.checkbox(f"{feature.replace('_', ' ').title()}?", value=False, key=f"cat_{feature}")
+        user_input_raw[feature] = 'Yes' if checkbox_value else 'No'
+    else:
+        user_input_raw[feature] = st.selectbox(f"{feature.replace('_', ' ').title()}", options=categories, key=f"cat_{feature}")
 
-    # Use a number_input for numerical features, with reasonable limits
-    input_data[feature] = st.sidebar.slider(
-        f"{feature.replace('_', ' ').title()}", # Nicer display name
-        min_value=min_val,
-        max_value=max_val,
-        value=mean_val,
-        step=(max_val - min_val) / 1000 # Small step for fine control
+if st.button("Predict Risk"):
+    # Convert raw user input into a DataFrame
+    input_df_raw = pd.DataFrame([user_input_raw])
+
+    # --- Preprocessing to match model's expected format ---
+    # One-Hot Encode Categorical Features
+    for col in CATEGORICAL_FEATURES_INFO.keys():
+        if col in input_df_raw.columns:
+            input_df_raw[col] = input_df_raw[col].astype('category')
+        else:
+            st.warning(f"Categorical column '{col}' not found in raw input. Adding with empty string.")
+            input_df_raw[col] = ''
+
+    input_df_processed = pd.get_dummies(input_df_raw, columns=list(CATEGORICAL_FEATURES_INFO.keys()))
+
+    # Reindex to ensure ALL expected columns (including OHE ones) are present and in correct order
+    final_input_for_prediction = pd.DataFrame(0, index=[0], columns=expected_input_columns_after_ohe)
+    for col in input_df_processed.columns:
+        if col in final_input_for_prediction.columns:
+            final_input_for_prediction[col] = input_df_processed[col].iloc[0]
+
+    # --- CRITICAL FIX: Ensure all columns are float before passing to model/SHAP ---
+    final_input_for_prediction = final_input_for_prediction.astype(float)
+
+    # --- Debugging final input for model (can be removed once confirmed working) ---
+    st.write("Debug: Final input to model shape:", final_input_for_prediction.shape)
+    st.write("Debug: Final input to model columns (first 10):", final_input_for_prediction.columns.tolist()[:10])
+    st.write("Debug: Final input to model data (first row):", final_input_for_prediction.iloc[0])
+    st.write("Debug: final_input_for_prediction dtypes:\n", final_input_for_prediction.dtypes)
+
+    # --- Make Prediction ---
+    prediction = model.predict(final_input_for_prediction)[0]
+    proba = model.predict_proba(final_input_for_prediction)[0][1]
+
+    st.success(f"Prediction: {'High Risk' if prediction == 1 else 'Low Risk'}")
+    st.info(f"Risk Probability Score: {proba:.2f}")
+
+    # --- SHAP Explanation ---
+    st.subheader("Feature Contribution (SHAP Waterfall Plot)")
+    
+    # --- CRITICAL: Initialize explainer with the loaded background data ---
+    explainer = shap.Explainer(model, shap_background_data) 
+
+    # --- CRITICAL FIX: Add check_additivity=False to bypass the error ---
+    shap_values = explainer(final_input_for_prediction, check_additivity=False)
+
+    # Extract SHAP values and expected value for the positive class (assuming binary classification)
+    if isinstance(shap_values, shap.Explanation):
+        shap_val = shap_values.values[0][:, 1] 
+        expected_val = explainer.expected_value[1] 
+        plot_feature_names = final_input_for_prediction.columns.tolist()
+    else:
+        st.warning("SHAP Explainer did not return an Explanation object. SHAP plot might be incorrect.")
+        # Fallback if shap_values is not an Explanation object (less ideal for robustness)
+        shap_val = shap_values[0][:]
+        expected_val = 0
+        plot_feature_names = final_input_for_prediction.columns.tolist()
+
+    # --- Debugging SHAP values (can be removed once confirmed working) ---
+    st.write("Debug: SHAP values (first 5):", shap_val[:5])
+    st.write("Debug: Expected Value:", expected_val)
+    if not isinstance(shap_val, np.ndarray) or shap_val.size == 0 or np.all(np.isclose(shap_val, 0)):
+        st.warning("Debug: SHAP values are all zeros or empty. Plot may appear blank. (This should be fixed now!)")
+
+    # Clear previous plot to prevent overlap
+    plt.clf()
+
+    # Temporarily set Matplotlib's default figure size
+    original_figsize = plt.rcParams['figure.figsize']
+    plt.rcParams['figure.figsize'] = (8, 6) 
+
+    # Generate the SHAP waterfall plot
+    fig = shap.plots._waterfall.waterfall_legacy(
+        expected_val,
+        shap_val,
+        feature_names=plot_feature_names,
+        max_display=3, # Keep low to manage memory/performance
+        show=False # Important: keeps Matplotlib from showing it outside Streamlit
     )
 
-# Convert input data dictionary to a Pandas DataFrame
-# Ensure the order of columns matches the order used during model training
-input_df = pd.DataFrame([input_data], columns=feature_names)
+    plt.tight_layout()
 
-st.subheader("Patient Input Data Preview:")
-st.write(input_df)
+    # --- CRITICAL: Save figure to BytesIO with low DPI and display via st.image ---
+    # This bypasses Streamlit's internal plotting method that caused MemoryError
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=50, bbox_inches='tight') # Low DPI for memory
+    buf.seek(0) # Rewind the buffer to the beginning
 
-# --- Prediction Button and Logic ---
-st.markdown("---")
-st.header("Prediction")
+    # --- Debugging Image Buffer (can be removed once confirmed working) ---
+    st.write("Debug: Size of image buffer (bytes):", len(buf.getvalue()))
+    if len(buf.getvalue()) == 0:
+        st.error("Debug: Image buffer is empty. Plot failed to save correctly. (This should be fixed now!)")
 
-col1, col2 = st.columns([1, 2])
+    st.image(buf.read(), use_container_width=True) # Use use_container_width for deprecation fix
+    buf.close() # Close the buffer to free memory
 
-with col1:
-    predict_button = st.button("Get Prediction", help="Click to predict the outcome based on inputs")
-
-with col2:
-    if predict_button:
-        try:
-            # Make prediction
-            prediction = model.predict(input_df)
-            prediction_proba = model.predict_proba(input_df) # Probability of each class
-
-            # Get the predicted class name (0 is malignant, 1 is benign)
-            predicted_class_name = target_names[prediction[0]].capitalize() # Capitalize for display
-
-            st.success(f"### The model predicts: **{predicted_class_name}**")
-
-            # Display probabilities
-            st.write(f"Probability of Malignant (Class 0): `{prediction_proba[0][0]:.4f}`")
-            st.write(f"Probability of Benign (Class 1): `{prediction_proba[0][1]:.4f}`")
-
-            if prediction[0] == 0: # Malignant
-                st.warning("⚠️ Prediction suggests: **Malignant** - It is strongly recommended to consult a medical professional for further diagnosis.")
-            else: # Benign
-                st.info("✅ Prediction suggests: **Benign** - It is still recommended to consult a medical professional for confirmation and regular check-ups.")
-
-        except Exception as e:
-            st.error(f"An error occurred during prediction: {e}")
-            st.write("Please check the input values and ensure the model is loaded correctly.")
-
-st.markdown("---")
-st.caption("Disclaimer: This app is for educational and demonstrative purposes only and should not be used for actual medical diagnosis. Always consult with a qualified healthcare professional for any medical concerns.")
+    # --- IMPORTANT: Close the Matplotlib figure to free its memory ---
+    plt.close(fig)
+    plt.rcParams['figure.figsize'] = original_figsize
