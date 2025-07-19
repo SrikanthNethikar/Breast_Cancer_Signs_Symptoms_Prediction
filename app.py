@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 import shap
+import pickle
 import matplotlib.pyplot as plt
 from PIL import Image
-import io 
+import io
+# Removed: import warnings and sklearn.exceptions.InconsistentVersionWarning as they are not needed for scikit-learn==1.2.2
 
 # Set PIL's max image pixels to None to prevent DecompressionBombError
 Image.MAX_IMAGE_PIXELS = None 
@@ -13,8 +14,13 @@ Image.MAX_IMAGE_PIXELS = None
 # --- 1. Load Model and Preprocessors ---
 @st.cache_resource # Cache the model loading for performance
 def load_model_and_assets():
+    """
+    Loads the trained machine learning model, expected column names after OHE,
+    and SHAP background data.
+    """
     try:
         model = pickle.load(open("breast_cancer_early_signs_model.pkl", "rb"))
+
         with open("model_columns.pkl", "rb") as f:
             expected_input_columns_after_ohe = pickle.load(f)
         
@@ -24,11 +30,25 @@ def load_model_and_assets():
             shap_background_data = pickle.load(f)
         
         return model, expected_input_columns_after_ohe, shap_background_data
+    
     except FileNotFoundError as e:
-        st.error(f"Error loading model or required files: {e}. Please ensure 'breast_cancer_early_signs_model.pkl', 'model_columns.pkl', AND 'shap_background_data.pkl' are in the same directory.")
+        st.error(f"Error loading model or required files: {e}. "
+                 f"Please ensure 'breast_cancer_early_signs_model.pkl', "
+                 f"'model_columns.pkl', AND 'shap_background_data.pkl' "
+                 f"are in the same directory as app.py.")
         st.stop() # Stop the app if crucial files are missing
+    except Exception as e:
+        # This catches other potential errors during loading,
+        # such as the ValueError due to scikit-learn version mismatch
+        st.error(f"An unexpected error occurred while loading model assets: {e}. "
+                 f"This often indicates a version mismatch between the scikit-learn "
+                 f"version used to train/save the model and the version currently installed. "
+                 f"Please ensure your scikit-learn version matches the one used for training. "
+                 f"You might need to retrain the model or downgrade scikit-learn.")
+        st.stop() # Stop the app execution on other loading errors
 
 # --- Unpack the loaded assets, including the new shap_background_data ---
+# This function is called once due to @st.cache_resource
 model, expected_input_columns_after_ohe, shap_background_data = load_model_and_assets()
 
 # --- Define Features (ensure these match your training data's structure) ---
@@ -82,13 +102,11 @@ if st.button("Predict Risk"):
     input_df_raw = pd.DataFrame([user_input_raw])
 
     # --- Preprocessing to match model's expected format ---
-    # One-Hot Encode Categorical Features
-    for col in CATEGORICAL_FEATURES_INFO.keys():
+    for col, categories in CATEGORICAL_FEATURES_INFO.items():
         if col in input_df_raw.columns:
-            input_df_raw[col] = input_df_raw[col].astype('category')
+            input_df_raw[col] = pd.Categorical(input_df_raw[col], categories=categories)
         else:
-            st.warning(f"Categorical column '{col}' not found in raw input. Adding with empty string.")
-            input_df_raw[col] = ''
+            input_df_raw[col] = pd.Categorical([], categories=categories)
 
     input_df_processed = pd.get_dummies(input_df_raw, columns=list(CATEGORICAL_FEATURES_INFO.keys()))
 
@@ -98,7 +116,7 @@ if st.button("Predict Risk"):
         if col in final_input_for_prediction.columns:
             final_input_for_prediction[col] = input_df_processed[col].iloc[0]
 
-    # --- CRITICAL FIX: Ensure all columns are float before passing to model/SHAP ---
+    # Ensure all columns are float before passing to model/SHAP
     final_input_for_prediction = final_input_for_prediction.astype(float)
 
     # --- Debugging final input for model (can be removed once confirmed working) ---
@@ -108,71 +126,91 @@ if st.button("Predict Risk"):
     st.write("Debug: final_input_for_prediction dtypes:\n", final_input_for_prediction.dtypes)
 
     # --- Make Prediction ---
-    prediction = model.predict(final_input_for_prediction)[0]
-    proba = model.predict_proba(final_input_for_prediction)[0][1]
+    try:
+        prediction = model.predict(final_input_for_prediction)[0]
+        proba = model.predict_proba(final_input_for_prediction)[0][1] # Probability of positive class (1)
 
-    st.success(f"Prediction: {'High Risk' if prediction == 1 else 'Low Risk'}")
-    st.info(f"Risk Probability Score: {proba:.2f}")
+        st.success(f"Prediction: {'High Risk' if prediction == 1 else 'Low Risk'}")
+        st.info(f"Risk Probability Score: {proba:.2f}")
 
-    # --- SHAP Explanation ---
-    st.subheader("Feature Contribution (SHAP Waterfall Plot)")
-    
-    # --- CRITICAL: Initialize explainer with the loaded background data ---
-    explainer = shap.Explainer(model, shap_background_data) 
+        # --- SHAP Explanation ---
+        st.subheader("Feature Contribution (SHAP Waterfall Plot)")
+        
+        # Initialize explainer with the loaded model and background data
+        explainer = shap.TreeExplainer(model, shap_background_data) 
 
-    # --- CRITICAL FIX: Add check_additivity=False to bypass the error ---
-    shap_values = explainer(final_input_for_prediction, check_additivity=False)
+        # Calculate SHAP values for the current input
+        shap_values = explainer(final_input_for_prediction, check_additivity=False)
 
-    # Extract SHAP values and expected value for the positive class (assuming binary classification)
-    if isinstance(shap_values, shap.Explanation):
-        shap_val = shap_values.values[0][:, 1] 
-        expected_val = explainer.expected_value[1] 
+        # --- CRITICAL FIX: Robust extraction of SHAP values and expected value ---
+        st.write("Debug: shap_values.values shape:", shap_values.values.shape)
+        st.write("Debug: shap_values.base_values shape:", shap_values.base_values.shape)
+        st.write("Debug: explainer.expected_value:", explainer.expected_value)
+
+        # Extract SHAP values for the single instance
+        # If shap_values.values is 3D (instance, feature, class), select class 1
+        if shap_values.values.ndim == 3 and shap_values.values.shape[2] > 1:
+            shap_val = shap_values.values[0, :, 1] # Select first instance, all features, class 1
+        else:
+            # Otherwise, assume it's 2D (instance, feature) or 1D (feature)
+            # and the values are directly for the output being explained
+            shap_val = shap_values.values[0] if shap_values.values.ndim > 1 else shap_values.values
+
+        # Extract expected value
+        # If explainer.expected_value is an array and has more than one element, select for class 1
+        if isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.ndim > 0 and explainer.expected_value.size > 1:
+            expected_val = explainer.expected_value[1] # Expected value for class 1
+        else:
+            # Otherwise, assume it's a scalar or a single-element array, take the first/only value
+            expected_val = explainer.expected_value[0] if isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.ndim > 0 else explainer.expected_value
+
+
         plot_feature_names = final_input_for_prediction.columns.tolist()
-    else:
-        st.warning("SHAP Explainer did not return an Explanation object. SHAP plot might be incorrect.")
-        # Fallback if shap_values is not an Explanation object (less ideal for robustness)
-        shap_val = shap_values[0][:]
-        expected_val = 0
-        plot_feature_names = final_input_for_prediction.columns.tolist()
 
-    # --- Debugging SHAP values (can be removed once confirmed working) ---
-    st.write("Debug: SHAP values (first 5):", shap_val[:5])
-    st.write("Debug: Expected Value:", expected_val)
-    if not isinstance(shap_val, np.ndarray) or shap_val.size == 0 or np.all(np.isclose(shap_val, 0)):
-        st.warning("Debug: SHAP values are all zeros or empty. Plot may appear blank. (This should be fixed now!)")
+        # --- Debugging SHAP values (can be removed once confirmed working) ---
+        st.write("Debug: SHAP values (first 5):", shap_val[:5])
+        st.write("Debug: Expected Value:", expected_val)
+        if not isinstance(shap_val, np.ndarray) or shap_val.size == 0 or np.all(np.isclose(shap_val, 0)):
+            st.warning("Debug: SHAP values are all zeros or empty. Plot may appear blank. (This might indicate an issue with SHAP calculation or model output.)")
 
-    # Clear previous plot to prevent overlap
-    plt.clf()
+        # Clear previous plot to prevent overlap and manage memory
+        plt.clf()
 
-    # Temporarily set Matplotlib's default figure size
-    original_figsize = plt.rcParams['figure.figsize']
-    plt.rcParams['figure.figsize'] = (8, 6) 
+        # Temporarily set Matplotlib's default figure size for the plot
+        original_figsize = plt.rcParams['figure.figsize']
+        plt.rcParams['figure.figsize'] = (10, 8) 
 
-    # Generate the SHAP waterfall plot
-    fig = shap.plots._waterfall.waterfall_legacy(
-        expected_val,
-        shap_val,
-        feature_names=plot_feature_names,
-        max_display=3, # Keep low to manage memory/performance
-        show=False # Important: keeps Matplotlib from showing it outside Streamlit
-    )
+        # Generate the SHAP waterfall plot
+        fig = shap.plots._waterfall.waterfall_legacy(
+            expected_val,
+            shap_val,
+            feature_names=plot_feature_names,
+            max_display=10, 
+            show=False 
+        )
 
-    plt.tight_layout()
+        plt.tight_layout() 
 
-    # --- CRITICAL: Save figure to BytesIO with low DPI and display via st.image ---
-    # This bypasses Streamlit's internal plotting method that caused MemoryError
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=50, bbox_inches='tight') # Low DPI for memory
-    buf.seek(0) # Rewind the buffer to the beginning
+        # Save figure to BytesIO with low DPI and display via st.image
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches='tight') 
+        buf.seek(0) 
 
-    # --- Debugging Image Buffer (can be removed once confirmed working) ---
-    st.write("Debug: Size of image buffer (bytes):", len(buf.getvalue()))
-    if len(buf.getvalue()) == 0:
-        st.error("Debug: Image buffer is empty. Plot failed to save correctly. (This should be fixed now!)")
+        # --- Debugging Image Buffer (can be removed once confirmed working) ---
+        st.write("Debug: Size of image buffer (bytes):", len(buf.getvalue()))
+        if len(buf.getvalue()) == 0:
+            st.error("Debug: Image buffer is empty. Plot failed to save correctly.")
 
-    st.image(buf.read(), use_container_width=True) # Use use_container_width for deprecation fix
-    buf.close() # Close the buffer to free memory
+        st.image(buf.read(), use_container_width=True) 
+        buf.close() 
 
-    # --- IMPORTANT: Close the Matplotlib figure to free its memory ---
-    plt.close(fig)
-    plt.rcParams['figure.figsize'] = original_figsize
+        # IMPORTANT: Close the Matplotlib figure to free its memory
+        plt.close(fig)
+        plt.rcParams['figure.figsize'] = original_figsize 
+
+    except Exception as e:
+        st.error(f"An error occurred during prediction or SHAP explanation: {e}")
+        st.warning("Please check your input values and ensure your model and SHAP background data are compatible.")
+
+st.markdown("---")
+st.caption("Developed with Streamlit and SHAP for educational purposes.")
