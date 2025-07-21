@@ -12,8 +12,8 @@ st.set_page_config(layout="wide", page_title="Breast Cancer Prediction App")
 
 # --- Constants ---
 # Define the paths to your model and data (adjust if different)
-MODEL_PATH = 'model/trained_model.pkl'  # Ensure this path is correct
-DATA_PATH = 'data/breast_cancer_data.csv'  # Ensure this path is correct
+MODEL_PATH = 'model/model_columns.pkl # Ensure this path is correct
+DATA_PATH = 'data/breast_cancer_early_risk.csv'
 
 # Define the features your model expects (IMPORTANT: MUST MATCH YOUR TRAINING DATA)
 FEATURES = [
