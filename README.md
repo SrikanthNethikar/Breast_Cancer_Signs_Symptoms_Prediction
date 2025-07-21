@@ -8,9 +8,8 @@ Goal: To provide a user-friendly tool for preliminary risk assessment, aiding in
 
 Experience the app live here:
 
-👉 Launch the Early Breast Cancer Risk Prediction App 👈
+👉 Launch the Early Breast Cancer Risk Prediction App(https://breastcancersignssymptomsprediction-tfmbuyy38pdvk4jwzzzbjw.streamlit.app/)👈
 
-    https://breastcancersignssymptomsprediction-tfmbuyy38pdvk4jwzzzbjw.streamlit.app/
     
 ✨ Features
 
