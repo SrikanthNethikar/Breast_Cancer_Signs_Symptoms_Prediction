@@ -1,0 +1,17 @@
+ Ignore Python virtual environment
+venv/
+
+# Ignore Python compiled files
+__pycache__/
+*.pyc
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore old/unused model files (as you've already added)
+breast_cancer_early_signs_model.pkl
+decision_tree_model.joblib
+
+# You might also want to add:
+# .DS_Store (for macOS users)
+# Thumbs.db (for Windows users)
