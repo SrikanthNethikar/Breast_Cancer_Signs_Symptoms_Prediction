@@ -214,17 +214,15 @@ if st.button("🔍 Predict Risk"):
         st.info("Please ensure all input values are valid and compatible with the model.")
 
 
-# --- SHAP Explanation Button ---
+# --- SHAP Explanation ---
 if st.button("🔬 Explain Prediction"):
     try:
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
 
         # Initialize SHAP explainer with the trained model and background data
-        # Use a sample of the background data if it's very large for performance
         explainer = shap.TreeExplainer(model, data=shap_background_data)
 
         # Calculate SHAP values for the current input
-        # Ensure the input_encoded DataFrame has the same columns as shap_background_data
         shap_values = explainer.shap_values(input_encoded)
 
         # For binary classification, shap_values is a list of two arrays.
@@ -240,14 +238,20 @@ if st.button("🔬 Explain Prediction"):
 
         # --- SHAP Waterfall Plot ---
         st.markdown("#### How individual features push the prediction from the base value to the output")
-        fig_waterfall, ax_waterfall = plt.subplots(figsize=(12, 8)) # Create a matplotlib figure
+        # Create a Matplotlib figure explicitly
+        fig_waterfall = plt.figure(figsize=(12, 8))
+        
+        # Create a SHAP Explanation object for the waterfall plot
         shap_explanation = shap.Explanation(
             values=shap_values_to_plot,
             base_values=expected_value_to_plot,
             data=input_encoded.iloc[0], # Pass the actual input data for features
             feature_names=feature_columns # Use the loaded feature names
         )
-        shap.plots.waterfall(shap_explanation, show=False, ax=ax_waterfall, max_display=15)
+        
+        # Call shap.plots.waterfall. It will draw on the currently active Matplotlib figure.
+        shap.plots.waterfall(shap_explanation, show=False) # show=False prevents it from calling plt.show()
+        
         st.pyplot(fig_waterfall, use_container_width=True)
         plt.clf() # Clear the current figure
         plt.close(fig_waterfall) # Close the figure to free memory
@@ -255,12 +259,14 @@ if st.button("🔬 Explain Prediction"):
 
         # --- SHAP Summary Plot (Bar) ---
         st.markdown("#### Overall impact of features on the model's output")
-        fig_summary, ax_summary = plt.subplots(figsize=(12, 7)) # Create another matplotlib figure
+        fig_summary = plt.figure(figsize=(12, 7)) # Create another Matplotlib figure explicitly
+        
         if isinstance(shap_values, list) and len(shap_values) > 1:
             # For multi-output, use shap_values[1] for positive class
-            shap.summary_plot(shap_values[1], shap_background_data, plot_type="bar", show=False, ax=ax_summary, max_display=15)
+            shap.summary_plot(shap_values[1], shap_background_data, plot_type="bar", show=False)
         else:
-            shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False, ax=ax_summary, max_display=15)
+            shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False)
+        
         st.pyplot(fig_summary, use_container_width=True)
         plt.clf() # Clear the current figure
         plt.close(fig_summary) # Close the figure to free memory
