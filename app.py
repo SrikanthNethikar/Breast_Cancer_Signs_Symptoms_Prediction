@@ -247,10 +247,8 @@ if st.button("🔬 Explain Prediction"):
         plt.close(fig_waterfall)
 
         # --- SHAP Summary Bar Plot ---
-        st.markdown("#### 📈 SHAP Summary Plot (Overall feature importance)")
-        fig_summary = plt.figure(figsize=(12, 7))
-        shap.summary_plot(shap_values.values, shap_background_data, plot_type="bar", show=False)
-        st.pyplot(fig_summary, use_container_width=True)
+        st.markdown("#### 📊 SHAP Summary Plot (Feature importance from training set)")
+        st.image("shap_summary_bar.png", caption="Top features contributing to breast cancer prediction", use_column_width=True)
         plt.clf()
         plt.close(fig_summary)
 
