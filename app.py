@@ -214,16 +214,17 @@ if st.button("🔍 Predict Risk"):
         st.info("Please ensure all input values are valid and compatible with the model.")
 
 
-# --- SHAP Explanation ---
 if st.button("🔬 Explain Prediction"):
     try:
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
 
         # Initialize SHAP explainer
-        explainer = shap.Explainer(model, shap_background_data)
+        explainer = shap.TreeExplainer(model, data=shap_background_data)
+
+        # Compute SHAP values
         shap_values = explainer(input_encoded)
 
-        # Select SHAP values for class 1
+        # Handle SHAP format (select class 1 explanation if multiclass/binary)
         if shap_values.values.ndim == 3:
             shap_values_to_plot = shap_values.values[0, :, 1]
             expected_value_to_plot = shap_values.base_values[0][1]
@@ -231,48 +232,57 @@ if st.button("🔬 Explain Prediction"):
             shap_values_to_plot = shap_values.values[0]
             expected_value_to_plot = shap_values.base_values[0]
 
-        # ✅ 📄 Create a downloadable CSV report
-        import pandas as pd
-        report_df = pd.DataFrame({
-            'Feature': feature_columns,
-            'Input Value': input_encoded.iloc[0].values,
-            'SHAP Value': shap_values_to_plot
-        })
-
-        st.markdown("### 📄 Download Prediction Report")
-        st.download_button(
-            label="📥 Download Report as CSV",
-            data=report_df.to_csv(index=False).encode('utf-8'),
-            file_name='breast_cancer_prediction_report.csv',
-            mime='text/csv'
-        )
-
-        # 🔵 SHAP Waterfall Plot
-        st.markdown("#### How individual features push the prediction from the base value to the output")
+        # --- Waterfall Plot ---
+        st.markdown("#### 📊 SHAP Waterfall Plot (Feature-level impact on prediction)")
         fig_waterfall = plt.figure(figsize=(12, 8))
-        shap_explanation = shap.Explanation(
+        shap_exp = shap.Explanation(
             values=shap_values_to_plot,
             base_values=expected_value_to_plot,
             data=input_encoded.iloc[0],
             feature_names=feature_columns
         )
-        shap.plots.waterfall(shap_explanation, show=False)
+        shap.plots.waterfall(shap_exp, show=False)
         st.pyplot(fig_waterfall, use_container_width=True)
         plt.clf()
         plt.close(fig_waterfall)
 
-        # 🔵 SHAP Summary Plot
-        st.markdown("#### Overall impact of features on the model's output (based on background data)")
+        # --- SHAP Summary Bar Plot ---
+        st.markdown("#### 📈 SHAP Summary Plot (Overall feature importance)")
         fig_summary = plt.figure(figsize=(12, 7))
-        background_shap_values = explainer(shap_background_data)
-        shap.summary_plot(background_shap_values, shap_background_data, plot_type="bar", show=False)
+        shap.summary_plot(shap_values.values, shap_background_data, plot_type="bar", show=False)
         st.pyplot(fig_summary, use_container_width=True)
         plt.clf()
         plt.close(fig_summary)
 
+        # --- CSV Report Download ---
+        report_df = pd.DataFrame({
+            'Feature': feature_columns,
+            'Input Value': input_encoded.iloc[0].values,
+            'SHAP Value': shap_values_to_plot
+        })
+        csv = report_df.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download SHAP Report (CSV)", data=csv, file_name="shap_report.csv", mime="text/csv")
+
+        # --- SHAP Force Plot (Interactive HTML) ---
+        st.markdown("#### 🔬 SHAP Force Plot (Interactive)")
+
+        force_plot = shap.plots.force(
+            base_value=expected_value_to_plot,
+            shap_values=shap_values_to_plot,
+            features=input_encoded.iloc[0],
+            feature_names=feature_columns,
+            matplotlib=False
+        )
+        shap.save_html("shap_force_plot_patient.html", force_plot)
+
+        # Display force plot in app
+        with open("shap_force_plot_patient.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        components.html(html_content, height=400)
+
     except Exception as e:
         st.error(f"An error occurred during SHAP explanation: {e}")
-        st.info("Please ensure your SHAP background data is compatible with the model and features.")
+        st.info("Please ensure your input data matches the model and background SHAP data.")
 
 st.markdown("---")
 st.markdown("Developed by Srikanth Nethikar")
