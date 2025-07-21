@@ -1,6 +1,57 @@
-streamlit
-pandas
-numpy
-scikit-learn==1.2.2
-shap==0.40.0
-matplotlib
+streamlit==1.36.0          # Stable, relatively recent Streamlit version
+shap==0.48.0               # The version you had. Let's keep trying it, but be ready to downgrade.
+numpy==1.26.4              # Compatible with recent shap, pandas, scikit-learn
+pandas==2.2.2              # Recent stable pandas
+scikit-learn==1.4.2        # Recent stable scikit-learn
+scipy==1.13.1              # Compatible with numpy and scikit-learn
+
+# Data Visualization and Utilities (Keep these if you are using them)
+altair==5.3.0
+matplotlib==3.8.4
+pydeck==0.9.1
+tqdm==4.66.4
+pillow==10.4.0
+
+# Other Dependencies (Keep only if truly needed by your app)
+attrs==23.2.0
+blinker==1.7.0
+cachetools==5.3.3
+certifi==2024.7.4
+charset-normalizer==3.3.2
+click==8.1.7
+cloudpickle==3.0.0
+colorama==0.4.6
+contourpy==1.2.1
+cycler==0.12.1
+Cython==3.0.10             # Often used for performance in data science libraries
+fonttools==4.53.0
+gitdb==4.0.12
+GitPython==3.1.43
+idna==3.7
+Jinja2==3.1.4
+joblib==1.4.2
+jsonschema==4.22.0
+jsonschema-specifications==2023.12.1
+kiwisolver==1.4.5
+llvmlite==0.42.0
+MarkupSafe==2.1.5
+narwhals==1.2.0            # If explicitly using narwhals dataframes
+numba==0.59.1              # Ensure numba is compatible with your numpy version
+packaging==24.1
+protobuf==4.25.3
+pyarrow==16.0.0
+python-dateutil==2.9.0.post0
+pytz==2024.1
+referencing==0.35.1
+requests==2.31.0
+rpds-py==0.19.0
+six==1.17.0
+slicer==0.0.8
+smmap==5.0.1
+tenacity==8.3.0
+toml==0.10.2
+tornado==6.4.1
+typing_extensions==4.12.2
+tzdata==2024.1
+urllib3==2.2.1
+watchdog==4.0.1
