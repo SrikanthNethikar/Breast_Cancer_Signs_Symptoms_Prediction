@@ -1,216 +1,199 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import joblib
 import shap
-import pickle
 import matplotlib.pyplot as plt
-from PIL import Image
-import io
-# Removed: import warnings and sklearn.exceptions.InconsistentVersionWarning as they are not needed for scikit-learn==1.2.2
+import sklearn # Make sure this is here to check version if needed, though we already got it
 
-# Set PIL's max image pixels to None to prevent DecompressionBombError
-Image.MAX_IMAGE_PIXELS = None 
+# --- Configuration ---
+# Set page configuration for a wider layout
+st.set_page_config(layout="wide", page_title="Breast Cancer Prediction App")
 
-# --- 1. Load Model and Preprocessors ---
-@st.cache_resource # Cache the model loading for performance
-def load_model_and_assets():
-    """
-    Loads the trained machine learning model, expected column names after OHE,
-    and SHAP background data.
-    """
-    try:
-        model = pickle.load(open("breast_cancer_early_signs_model.pkl", "rb"))
+# --- Constants ---
+# Define the paths to your model and data (adjust if different)
+MODEL_PATH = 'model/trained_model.pkl'  # Ensure this path is correct
+DATA_PATH = 'data/breast_cancer_data.csv'  # Ensure this path is correct
 
-        with open("model_columns.pkl", "rb") as f:
-            expected_input_columns_after_ohe = pickle.load(f)
-        
-        # --- CRITICAL: Load SHAP background data ---
-        # This file must contain a preprocessed sample of your training data
-        with open("shap_background_data.pkl", "rb") as f:
-            shap_background_data = pickle.load(f)
-        
-        return model, expected_input_columns_after_ohe, shap_background_data
-    
-    except FileNotFoundError as e:
-        st.error(f"Error loading model or required files: {e}. "
-                 f"Please ensure 'breast_cancer_early_signs_model.pkl', "
-                 f"'model_columns.pkl', AND 'shap_background_data.pkl' "
-                 f"are in the same directory as app.py.")
-        st.stop() # Stop the app if crucial files are missing
-    except Exception as e:
-        # This catches other potential errors during loading,
-        # such as the ValueError due to scikit-learn version mismatch
-        st.error(f"An unexpected error occurred while loading model assets: {e}. "
-                 f"This often indicates a version mismatch between the scikit-learn "
-                 f"version used to train/save the model and the version currently installed. "
-                 f"Please ensure your scikit-learn version matches the one used for training. "
-                 f"You might need to retrain the model or downgrade scikit-learn.")
-        st.stop() # Stop the app execution on other loading errors
-
-# --- Unpack the loaded assets, including the new shap_background_data ---
-# This function is called once due to @st.cache_resource
-model, expected_input_columns_after_ohe, shap_background_data = load_model_and_assets()
-
-# --- Define Features (ensure these match your training data's structure) ---
-NUMERICAL_FEATURES = [
-    'mean radius', 'mean texture', 'mean perimeter', 'mean area',
-    'mean smoothness', 'mean compactness', 'mean concavity',
-    'mean concave points', 'mean symmetry', 'mean fractal dimension',
-    'radius error', 'texture error', 'perimeter error', 'area error',
-    'smoothness error', 'compactness error', 'concavity error',
-    'concave points error', 'symmetry error', 'fractal dimension error',
-    'worst radius', 'worst texture', 'worst perimeter', 'worst area',
-    'worst smoothness', 'worst compactness', 'worst concavity',
-    'worst concave points', 'worst symmetry', 'worst fractal dimension'
+# Define the features your model expects (IMPORTANT: MUST MATCH YOUR TRAINING DATA)
+FEATURES = [
+    'Clump Thickness', 'Uniformity of Cell Size', 'Uniformity of Cell Shape',
+    'Marginal Adhesion', 'Single Epithelial Cell Size', 'Bare Nuclei',
+    'Bland Chromatin', 'Normal Nucleoli', 'Mitoses'
 ]
+TARGET_COLUMN = 'Class' # The name of your target column in the original dataset
 
-CATEGORICAL_FEATURES_INFO = {
-    'family_history_breast_cancer': ['No', 'Yes'],
-    'menopause_status': ['Post', 'Pre'],
-    'alcohol_intake_per_week': ['Heavy', 'Light', 'Moderate', 'nan'],
-    'physical_activity_level': ['Active', 'Moderate', 'Sedentary'],
-    'nipple_discharge': ['No', 'Yes'],
-    'palpable_lump': ['No', 'Yes'],
-    'localized_breast_pain': ['No', 'Yes']
-}
+# --- Helper Functions (using Streamlit's caching for performance) ---
 
-# --- Streamlit UI ---
-st.title("🩺 Breast Cancer Early Signs Prediction")
-st.header("Enter Patient Information")
-user_input_raw = {}
-
-st.subheader("Numerical Features") 
-for feature in NUMERICAL_FEATURES:
-    # Set default values and ranges as appropriate for your data
-    if 'radius' in feature or 'perimeter' in feature or 'area' in feature or 'size' in feature:
-        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", min_value=0.0, max_value=100.0, value=5.0, key=f"num_{feature}")
-    elif 'texture' in feature or 'smoothness' in feature or 'compactness' in feature or 'concavity' in feature or 'symmetry' in feature or 'fractal dimension' in feature:
-        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", min_value=0.0, max_value=1.0, value=0.1, format="%.4f", key=f"num_{feature}")
-    else:
-        user_input_raw[feature] = st.number_input(f"{feature.replace('_', ' ').title()}", value=0.0, key=f"num_{feature}")
-
-st.subheader("Categorical Features") 
-for feature, categories in CATEGORICAL_FEATURES_INFO.items():
-    if len(categories) == 2 and 'Yes' in categories and 'No' in categories: 
-        checkbox_value = st.checkbox(f"{feature.replace('_', ' ').title()}?", value=False, key=f"cat_{feature}")
-        user_input_raw[feature] = 'Yes' if checkbox_value else 'No'
-    else:
-        user_input_raw[feature] = st.selectbox(f"{feature.replace('_', ' ').title()}", options=categories, key=f"cat_{feature}")
-
-if st.button("Predict Risk"):
-    # Convert raw user input into a DataFrame
-    input_df_raw = pd.DataFrame([user_input_raw])
-
-    # --- Preprocessing to match model's expected format ---
-    for col, categories in CATEGORICAL_FEATURES_INFO.items():
-        if col in input_df_raw.columns:
-            input_df_raw[col] = pd.Categorical(input_df_raw[col], categories=categories)
-        else:
-            input_df_raw[col] = pd.Categorical([], categories=categories)
-
-    input_df_processed = pd.get_dummies(input_df_raw, columns=list(CATEGORICAL_FEATURES_INFO.keys()))
-
-    # Reindex to ensure ALL expected columns (including OHE ones) are present and in correct order
-    final_input_for_prediction = pd.DataFrame(0, index=[0], columns=expected_input_columns_after_ohe)
-    for col in input_df_processed.columns:
-        if col in final_input_for_prediction.columns:
-            final_input_for_prediction[col] = input_df_processed[col].iloc[0]
-
-    # Ensure all columns are float before passing to model/SHAP
-    final_input_for_prediction = final_input_for_prediction.astype(float)
-
-    # --- Debugging final input for model (can be removed once confirmed working) ---
-    st.write("Debug: Final input to model shape:", final_input_for_prediction.shape)
-    st.write("Debug: Final input to model columns (first 10):", final_input_for_prediction.columns.tolist()[:10])
-    st.write("Debug: Final input to model data (first row):", final_input_for_prediction.iloc[0])
-    st.write("Debug: final_input_for_prediction dtypes:\n", final_input_for_prediction.dtypes)
-
-    # --- Make Prediction ---
+@st.cache_resource # Use st.cache_resource for models and large objects
+def load_model(path):
+    """Loads the pre-trained model."""
     try:
-        prediction = model.predict(final_input_for_prediction)[0]
-        proba = model.predict_proba(final_input_for_prediction)[0][1] # Probability of positive class (1)
+        model = joblib.load(path)
+        return model
+    except FileNotFoundError:
+        st.error(f"Error: Model file not found at {path}. Please check the path and ensure it's in your repository.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        st.stop()
 
-        st.success(f"Prediction: {'High Risk' if prediction == 1 else 'Low Risk'}")
-        st.info(f"Risk Probability Score: {proba:.2f}")
+@st.cache_data # Use st.cache_data for dataframes
+def load_data(path):
+    """Loads the dataset for display and SHAP background."""
+    try:
+        df = pd.read_csv(path)
+        return df
+    except FileNotFoundError:
+        st.error(f"Error: Data file not found at {path}. Please check the path and ensure it's in your repository.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        st.stop()
 
-        # --- SHAP Explanation ---
-        st.subheader("Feature Contribution (SHAP Waterfall Plot)")
-        
-        # Initialize explainer with the loaded model and background data
-        explainer = shap.TreeExplainer(model, shap_background_data) 
+# --- Load Model and Data ---
+model = load_model(MODEL_PATH)
+df_original = load_data(DATA_PATH)
+
+# Prepare data for SHAP: exclude target and any non-feature columns
+# IMPORTANT: Ensure df_for_shap contains only the features your model was trained on
+df_for_shap = df_original[FEATURES]
+
+
+# --- App Title and Description ---
+st.title("Breast Cancer Early Signs & Symptoms Prediction")
+st.markdown("""
+    This application predicts the likelihood of breast cancer based on various cell characteristics.
+    Please enter the values for the features below to get a prediction and an explanation of the model's output.
+""")
+
+# --- Input Section ---
+st.header("Input Patient Data")
+
+# Using st.columns for a better layout for inputs
+col1, col2, col3 = st.columns(3)
+
+input_data = {}
+with col1:
+    input_data['Clump Thickness'] = st.slider('Clump Thickness (1-10)', 1, 10, 5)
+    input_data['Uniformity of Cell Size'] = st.slider('Uniformity of Cell Size (1-10)', 1, 10, 5)
+    input_data['Uniformity of Cell Shape'] = st.slider('Uniformity of Cell Shape (1-10)', 1, 10, 5)
+with col2:
+    input_data['Marginal Adhesion'] = st.slider('Marginal Adhesion (1-10)', 1, 10, 5)
+    input_data['Single Epithelial Cell Size'] = st.slider('Single Epithelial Cell Size (1-10)', 1, 10, 5)
+    input_data['Bare Nuclei'] = st.slider('Bare Nuclei (1-10)', 1, 10, 5)
+with col3:
+    input_data['Bland Chromatin'] = st.slider('Bland Chromatin (1-10)', 1, 10, 5)
+    input_data['Normal Nucleoli'] = st.slider('Normal Nucleoli (1-10)', 1, 10, 5)
+    input_data['Mitoses'] = st.slider('Mitoses (1-10)', 1, 10, 5)
+
+# Convert input_data to a DataFrame for prediction
+input_df = pd.DataFrame([input_data])
+
+
+# --- Prediction and Explanation Section ---
+st.header("Prediction Results and Explanation")
+
+if st.button("Predict"):
+    try:
+        # Get prediction probabilities
+        prediction_proba = model.predict_proba(input_df)[0]
+        # Get the predicted class (0 for Benign, 1 for Malignant assuming your model outputs this)
+        predicted_class = np.argmax(prediction_proba)
+
+        st.subheader("Prediction:")
+        if predicted_class == 0:
+            st.success(f"**Prediction: Benign** (Probability: {prediction_proba[0]:.2f})")
+        else:
+            st.error(f"**Prediction: Malignant** (Probability: {prediction_proba[1]:.2f})")
+
+        st.markdown("---") # Separator
+
+        st.subheader("Model Explanation (SHAP Values)")
+
+        # Initialize SHAP explainer
+        # For tree-based models, TreeExplainer is efficient
+        explainer = shap.TreeExplainer(model, data=df_for_shap) # Pass background data for better explanations
 
         # Calculate SHAP values for the current input
-        shap_values = explainer(final_input_for_prediction, check_additivity=False)
+        # Ensure the input_df has feature names matching df_for_shap
+        shap_values = explainer.shap_values(input_df)
 
-        # --- CRITICAL FIX: Robust extraction of SHAP values and expected value ---
-        st.write("Debug: shap_values.values shape:", shap_values.values.shape)
-        st.write("Debug: shap_values.base_values shape:", shap_values.base_values.shape)
-        st.write("Debug: explainer.expected_value:", explainer.expected_value)
+        # --- Debug SHAP output for clarity ---
+        st.write(f"Debug: shap_values type: {type(shap_values)}")
+        if isinstance(shap_values, list): # For multi-output models (e.g., multi-class or binary with two columns)
+            st.write(f"Debug: shap_values (list of arrays) length: {len(shap_values)}")
+            st.write(f"Debug: shap_values[0] shape: {shap_values[0].shape}")
+            st.write(f"Debug: shap_values[1] shape: {shap_values[1].shape}")
+            # Assuming binary classification where shap_values[1] is for the positive class
+            shap_values_to_plot = shap_values[1]
+            expected_value_to_plot = explainer.expected_value[1] if isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value
+            st.write(f"Debug: Explainer expected_value (for class 1): {expected_value_to_plot}")
+        else: # For single-output models (e.g., regression or binary as one column)
+            st.write(f"Debug: shap_values shape: {shap_values.shape}")
+            shap_values_to_plot = shap_values
+            expected_value_to_plot = explainer.expected_value
+            st.write(f"Debug: Explainer expected_value: {expected_value_to_plot}")
 
-        # Extract SHAP values for the single instance
-        # If shap_values.values is 3D (instance, feature, class), select class 1
-        if shap_values.values.ndim == 3 and shap_values.values.shape[2] > 1:
-            shap_val = shap_values.values[0, :, 1] # Select first instance, all features, class 1
-        else:
-            # Otherwise, assume it's 2D (instance, feature) or 1D (feature)
-            # and the values are directly for the output being explained
-            shap_val = shap_values.values[0] if shap_values.values.ndim > 1 else shap_values.values
-
-        # Extract expected value
-        # If explainer.expected_value is an array and has more than one element, select for class 1
-        if isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.ndim > 0 and explainer.expected_value.size > 1:
-            expected_val = explainer.expected_value[1] # Expected value for class 1
-        else:
-            # Otherwise, assume it's a scalar or a single-element array, take the first/only value
-            expected_val = explainer.expected_value[0] if isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.ndim > 0 else explainer.expected_value
-
-
-        plot_feature_names = final_input_for_prediction.columns.tolist()
-
-        # --- Debugging SHAP values (can be removed once confirmed working) ---
-        st.write("Debug: SHAP values (first 5):", shap_val[:5])
-        st.write("Debug: Expected Value:", expected_val)
-        if not isinstance(shap_val, np.ndarray) or shap_val.size == 0 or np.all(np.isclose(shap_val, 0)):
-            st.warning("Debug: SHAP values are all zeros or empty. Plot may appear blank. (This might indicate an issue with SHAP calculation or model output.)")
-
-        # Clear previous plot to prevent overlap and manage memory
-        plt.clf()
-
-        # Temporarily set Matplotlib's default figure size for the plot
-        original_figsize = plt.rcParams['figure.figsize']
-        plt.rcParams['figure.figsize'] = (10, 8) 
-
-        # Generate the SHAP waterfall plot
-        fig = shap.plots._waterfall.waterfall_legacy(
-            expected_val,
-            shap_val,
-            feature_names=plot_feature_names,
-            max_display=10, 
-            show=False 
+        # Create a SHAP Explanation object for the waterfall plot
+        # Use the correct SHAP values and base value (expected_value)
+        # Ensure feature_names are passed correctly
+        e = shap.Explanation(
+            values=shap_values_to_plot[0], # Take the first (and only) instance
+            base_values=expected_value_to_plot,
+            data=input_df.iloc[0], # Pass the actual input data for features
+            feature_names=FEATURES
         )
 
-        plt.tight_layout() 
+        st.subheader("Feature Contribution (SHAP Waterfall Plot)")
 
-        # Save figure to BytesIO with low DPI and display via st.image
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=100, bbox_inches='tight') 
-        buf.seek(0) 
+        # --- THE FIX FOR `use_container_width` ERROR ---
+        # Create a matplotlib figure to draw the SHAP plot on
+        fig, ax = plt.subplots(figsize=(12, 7)) # Adjust figsize as needed for better readability
 
-        # --- Debugging Image Buffer (can be removed once confirmed working) ---
-        st.write("Debug: Size of image buffer (bytes):", len(buf.getvalue()))
-        if len(buf.getvalue()) == 0:
-            st.error("Debug: Image buffer is empty. Plot failed to save correctly.")
+        # Generate the SHAP waterfall plot on the created axes
+        # Pass 'show=False' to prevent shap from trying to display it itself
+        # and 'ax=ax' to tell it to plot on our specific matplotlib axes.
+        shap.plots.waterfall(e, show=False, ax=ax)
 
-        st.image(buf.read(), use_container_width=True) 
-        buf.close() 
+        # Display the matplotlib figure in Streamlit with use_container_width
+        st.pyplot(fig, use_container_width=True)
 
-        # IMPORTANT: Close the Matplotlib figure to free its memory
+        # Clear the current figure to prevent plots from overlapping in subsequent runs
+        plt.clf()
         plt.close(fig)
-        plt.rcParams['figure.figsize'] = original_figsize 
+        # --- END OF FIX ---
+
+
+        st.subheader("Summary of Feature Importance (SHAP Bar Plot)")
+        # Calculate SHAP values for a sample of the data for the summary plot
+        # It's better to use a representative sample, not just one instance
+        # If your df_for_shap is large, sample it for performance on Streamlit Cloud
+        if len(df_for_shap) > 1000: # Example: take a sample if data is too big
+            sample_df = df_for_shap.sample(1000, random_state=42)
+        else:
+            sample_df = df_for_shap
+
+        explainer_summary = shap.TreeExplainer(model, data=sample_df)
+        shap_values_summary = explainer_summary.shap_values(sample_df)
+
+        fig_summary, ax_summary = plt.subplots(figsize=(10, 6))
+        # Assuming binary classification, show importance for the positive class (index 1)
+        # If not multi-output or regression, just use shap_values_summary directly
+        if isinstance(shap_values_summary, list):
+            shap.summary_plot(shap_values_summary[1], sample_df, plot_type="bar", show=False, ax=ax_summary)
+        else:
+            shap.summary_plot(shap_values_summary, sample_df, plot_type="bar", show=False, ax=ax_summary)
+
+        st.pyplot(fig_summary, use_container_width=True)
+        plt.clf()
+        plt.close(fig_summary)
+
 
     except Exception as e:
         st.error(f"An error occurred during prediction or SHAP explanation: {e}")
-        st.warning("Please check your input values and ensure your model and SHAP background data are compatible.")
+        st.info("Please check your input values and ensure your model and SHAP background data are compatible. "
+                "Also, verify that the feature names used for input match the model's expected features.")
 
 st.markdown("---")
-st.caption("Developed with Streamlit and SHAP for educational purposes.")
+st.markdown("Developed by Srikanth Nethikar")
