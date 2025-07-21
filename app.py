@@ -214,7 +214,7 @@ if st.button("🔍 Predict Risk"):
         st.info("Please ensure all input values are valid and compatible with the model.")
 
 
-# --- SHAP Explanation ---
+## --- SHAP Explanation ---
 if st.button("🔬 Explain Prediction"):
     try:
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
@@ -222,7 +222,7 @@ if st.button("🔬 Explain Prediction"):
         # Initialize SHAP explainer with the trained model and background data
         explainer = shap.Explainer(model, shap_background_data)
 
-        # Compute SHAP values for the input
+        # Compute SHAP values for the single input
         shap_values = explainer(input_encoded)  # Returns shap.Explanation object
 
         # --- Select SHAP values for class 1 (Malignant) ---
@@ -252,9 +252,13 @@ if st.button("🔬 Explain Prediction"):
         plt.close(fig_waterfall)
 
         # --- SHAP Summary Plot (Bar) ---
-        st.markdown("#### Overall impact of features on the model's output")
+        st.markdown("#### Overall impact of features on the model's output (based on background data)")
         fig_summary = plt.figure(figsize=(12, 7))
-        shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False)
+
+        # Compute SHAP values for the entire background dataset
+        background_shap_values = explainer(shap_background_data)
+
+        shap.summary_plot(background_shap_values, shap_background_data, plot_type="bar", show=False)
         st.pyplot(fig_summary, use_container_width=True)
         plt.clf()
         plt.close(fig_summary)
