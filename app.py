@@ -5,6 +5,8 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 import sklearn # Ensure scikit-learn is available for model compatibility
+import streamlit.components.v1 as components
+
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(layout="wide", page_title="Early Breast Cancer Risk Prediction")
