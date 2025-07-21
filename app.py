@@ -218,13 +218,13 @@ if st.button("🔬 Explain Prediction"):
     try:
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
 
-        # Initialize SHAP explainer
+        # Initialize SHAP explainer with background data
         explainer = shap.TreeExplainer(model, data=shap_background_data)
 
         # Compute SHAP values
         shap_values = explainer(input_encoded)
 
-        # Handle SHAP format (select class 1 explanation if multiclass/binary)
+        # Handle multiclass or binary classification
         if shap_values.values.ndim == 3:
             shap_values_to_plot = shap_values.values[0, :, 1]
             expected_value_to_plot = shap_values.base_values[0][1]
@@ -232,27 +232,28 @@ if st.button("🔬 Explain Prediction"):
             shap_values_to_plot = shap_values.values[0]
             expected_value_to_plot = shap_values.base_values[0]
 
-        # --- Waterfall Plot ---
+        # --- SHAP Waterfall Plot ---
         st.markdown("#### 📊 SHAP Waterfall Plot (Feature-level impact on prediction)")
-        fig_waterfall = plt.figure(figsize=(12, 8))
         shap_exp = shap.Explanation(
             values=shap_values_to_plot,
             base_values=expected_value_to_plot,
             data=input_encoded.iloc[0],
             feature_names=feature_columns
         )
+        fig_waterfall = plt.figure(figsize=(12, 8))
         shap.plots.waterfall(shap_exp, show=False)
         st.pyplot(fig_waterfall, use_container_width=True)
         plt.clf()
         plt.close(fig_waterfall)
 
-        # --- SHAP Summary Bar Plot ---
+        # --- SHAP Summary Bar Plot (static PNG image from training) ---
         st.markdown("#### 📊 SHAP Summary Plot (Feature importance from training set)")
-        st.image("shap_summary_bar.png", caption="Top features contributing to breast cancer prediction", use_column_width=True)
-        plt.clf()
-        plt.close(fig_summary)
+        try:
+            st.image("shap_summary_bar.png", caption="Top features contributing to breast cancer prediction", use_column_width=True)
+        except FileNotFoundError:
+            st.warning("⚠️ SHAP summary bar image not found. Please make sure `shap_summary_bar.png` is in the project folder.")
 
-        # --- CSV Report Download ---
+        # --- SHAP CSV Report ---
         report_df = pd.DataFrame({
             'Feature': feature_columns,
             'Input Value': input_encoded.iloc[0].values,
@@ -263,7 +264,6 @@ if st.button("🔬 Explain Prediction"):
 
         # --- SHAP Force Plot (Interactive HTML) ---
         st.markdown("#### 🔬 SHAP Force Plot (Interactive)")
-
         force_plot = shap.plots.force(
             base_value=expected_value_to_plot,
             shap_values=shap_values_to_plot,
@@ -273,7 +273,7 @@ if st.button("🔬 Explain Prediction"):
         )
         shap.save_html("shap_force_plot_patient.html", force_plot)
 
-        # Display force plot in app
+        # Display HTML force plot in app
         with open("shap_force_plot_patient.html", "r", encoding="utf-8") as f:
             html_content = f.read()
         components.html(html_content, height=400)
@@ -282,5 +282,6 @@ if st.button("🔬 Explain Prediction"):
         st.error(f"An error occurred during SHAP explanation: {e}")
         st.info("Please ensure your input data matches the model and background SHAP data.")
 
+# Footer
 st.markdown("---")
 st.markdown("Developed by Srikanth Nethikar")
