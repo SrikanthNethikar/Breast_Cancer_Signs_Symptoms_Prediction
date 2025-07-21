@@ -11,7 +11,7 @@ st.set_page_config(layout="wide", page_title="Early Breast Cancer Risk Predictio
 
 # --- Constants for File Paths ---
 # Define paths relative to your repository's root
-MODEL_PATH = "model/breast_cancer_risk_model.pkl"
+MODEL_PATH = "model/model_columns.pkl"
 FEATURE_COLUMNS_PATH = "model/feature_columns.pkl"
 # This CSV is used as background data for SHAP explanations
 SHAP_BACKGROUND_DATA_PATH = "data/breast_cancer_early_risk.csv"
