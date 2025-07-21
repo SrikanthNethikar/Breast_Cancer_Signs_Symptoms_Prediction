@@ -214,50 +214,57 @@ if st.button("🔍 Predict Risk"):
         st.info("Please ensure all input values are valid and compatible with the model.")
 
 
-## --- SHAP Explanation ---
+# --- SHAP Explanation ---
 if st.button("🔬 Explain Prediction"):
     try:
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
 
-        # Initialize SHAP explainer with the trained model and background data
+        # Initialize SHAP explainer
         explainer = shap.Explainer(model, shap_background_data)
+        shap_values = explainer(input_encoded)
 
-        # Compute SHAP values for the single input
-        shap_values = explainer(input_encoded)  # Returns shap.Explanation object
-
-        # --- Select SHAP values for class 1 (Malignant) ---
+        # Select SHAP values for class 1
         if shap_values.values.ndim == 3:
-            # shape = (1, num_features, num_classes)
-            shap_values_to_plot = shap_values.values[0, :, 1]  # Class 1
+            shap_values_to_plot = shap_values.values[0, :, 1]
             expected_value_to_plot = shap_values.base_values[0][1]
         else:
-            # shape = (1, num_features)
             shap_values_to_plot = shap_values.values[0]
             expected_value_to_plot = shap_values.base_values[0]
 
-        # --- SHAP Waterfall Plot ---
+        # ✅ 📄 Create a downloadable CSV report
+        import pandas as pd
+        report_df = pd.DataFrame({
+            'Feature': feature_columns,
+            'Input Value': input_encoded.iloc[0].values,
+            'SHAP Value': shap_values_to_plot
+        })
+
+        st.markdown("### 📄 Download Prediction Report")
+        st.download_button(
+            label="📥 Download Report as CSV",
+            data=report_df.to_csv(index=False).encode('utf-8'),
+            file_name='breast_cancer_prediction_report.csv',
+            mime='text/csv'
+        )
+
+        # 🔵 SHAP Waterfall Plot
         st.markdown("#### How individual features push the prediction from the base value to the output")
         fig_waterfall = plt.figure(figsize=(12, 8))
-
         shap_explanation = shap.Explanation(
             values=shap_values_to_plot,
             base_values=expected_value_to_plot,
             data=input_encoded.iloc[0],
             feature_names=feature_columns
         )
-
         shap.plots.waterfall(shap_explanation, show=False)
         st.pyplot(fig_waterfall, use_container_width=True)
         plt.clf()
         plt.close(fig_waterfall)
 
-        # --- SHAP Summary Plot (Bar) ---
+        # 🔵 SHAP Summary Plot
         st.markdown("#### Overall impact of features on the model's output (based on background data)")
         fig_summary = plt.figure(figsize=(12, 7))
-
-        # Compute SHAP values for the entire background dataset
         background_shap_values = explainer(shap_background_data)
-
         shap.summary_plot(background_shap_values, shap_background_data, plot_type="bar", show=False)
         st.pyplot(fig_summary, use_container_width=True)
         plt.clf()
