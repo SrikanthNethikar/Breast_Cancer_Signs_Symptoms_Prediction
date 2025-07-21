@@ -9,7 +9,6 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Ignore old/unused model files (as you've already added)
-breast_cancer_early_signs_model.pkl
 decision_tree_model.joblib
 
 # You might also want to add:

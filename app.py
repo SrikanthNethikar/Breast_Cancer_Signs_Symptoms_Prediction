@@ -11,10 +11,10 @@ st.set_page_config(layout="wide", page_title="Early Breast Cancer Risk Predictio
 
 # --- Constants for File Paths ---
 # Define paths relative to your repository's root
-MODEL_PATH = "model/model_columns.pkl"
-FEATURE_COLUMNS_PATH = "model/feature_columns.pkl"
-# This CSV is used as background data for SHAP explanations
-SHAP_BACKGROUND_DATA_PATH = "data/breast_cancer_early_risk.csv"
+MODEL_PATH = "model/breast_cancer_risk_model.pkl"
+FEATURE_COLUMNS_PATH = "model/model_columns.pkl" # Assuming this is correct for feature names
+# *** CHANGED TO USE THE PKL FILE FOR SHAP BACKGROUND DATA ***
+SHAP_BACKGROUND_DATA_PATH = "data/shap_background_data.pkl"
 
 # --- Helper Functions (with caching for performance) ---
 
@@ -45,16 +45,17 @@ def load_feature_columns(path):
         st.stop()
 
 @st.cache_data
-def load_original_data_for_shap(path, feature_cols):
+def load_shap_background_data(path, feature_cols):
     """
-    Loads the original dataset to be used as background data for SHAP.
-    It will select only the columns relevant to the model.
+    Loads the SHAP background data from a PKL file.
+    It will ensure the data contains only the columns relevant to the model.
     """
     try:
-        df = pd.read_csv(path)
+        # *** CHANGED TO LOAD PKL FILE ***
+        df_for_shap = joblib.load(path)
         # Ensure the background data only contains the features the model expects
         # and handle any missing columns by filling with 0
-        df_for_shap = df.reindex(columns=feature_cols, fill_value=0)
+        df_for_shap = df_for_shap.reindex(columns=feature_cols, fill_value=0)
         return df_for_shap
     except FileNotFoundError:
         st.error(f"Error: SHAP background data file not found at {path}. Please ensure it's in your 'data/' directory on GitHub.")
@@ -66,9 +67,8 @@ def load_original_data_for_shap(path, feature_cols):
 # --- Load Model, Feature Columns, and SHAP Background Data ---
 model = load_model(MODEL_PATH)
 feature_columns = load_feature_columns(FEATURE_COLUMNS_PATH)
-# Load a sample of the original data for SHAP background.
-# It's good practice to use a representative sample if the dataset is very large.
-shap_background_data = load_original_data_for_shap(SHAP_BACKGROUND_DATA_PATH, feature_columns)
+# Load SHAP background data using the new function
+shap_background_data = load_shap_background_data(SHAP_BACKGROUND_DATA_PATH, feature_columns)
 
 
 # --- App Title and Description ---
@@ -143,7 +143,6 @@ with col6:
     nipple_discharge = st.selectbox("Nipple Discharge", options=["No", "Yes"])
     palpable_lump = st.selectbox("Palpable Lump", options=["No", "Yes"])
     localized_pain = st.selectbox("Localized Breast Pain", options=["No", "Yes"])
-
 
 # --- Prepare Input for Prediction ---
 # Create a dictionary for the input features
