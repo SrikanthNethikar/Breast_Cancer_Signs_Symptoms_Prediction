@@ -10,7 +10,8 @@ Experience the app live here:
 
 👉 Launch the Early Breast Cancer Risk Prediction App 👈
 
-(Remember to replace https://your-app-name.streamlit.app with your actual deployed Streamlit app URL!)
+    https://breastcancersignssymptomsprediction-tfmbuyy38pdvk4jwzzzbjw.streamlit.app/
+    
 ✨ Features
 
     Interactive Input: User-friendly sliders and select boxes for entering various patient parameters across mean measurements, error metrics, worst measurements, and patient history/lifestyle.
@@ -97,8 +98,7 @@ Understanding why a model makes a certain prediction is crucial, especially in h
 
     Srikanth Nethikar
 
-        Your LinkedIn Profile Link Here (Optional)
-
+        (https://www.linkedin.com/in/nethikar-srikanth-401030371/)
 📄 License
 
 This project is licensed under the MIT License.
