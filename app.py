@@ -225,51 +225,48 @@ if st.button("🔬 Explain Prediction"):
         # Calculate SHAP values for the current input
         shap_values = explainer.shap_values(input_encoded)
 
-        # For binary classification, shap_values is a list of two arrays.
-        # We usually explain the positive class (index 1).
+        # --- Select SHAP values for positive class only (Malignant = class 1) ---
         if isinstance(shap_values, list) and len(shap_values) > 1:
-            shap_values_to_plot = shap_values[1][0] # Get SHAP values for the positive class (Malignant) for the first instance
-            expected_value_to_plot = explainer.expected_value[1] # Get expected value for the positive class
+            # Typical case for binary classification with SHAP list output
+            shap_values_to_plot = shap_values[1][0]  # Class 1, single instance
+            expected_value_to_plot = explainer.expected_value[1]
+        elif hasattr(shap_values, 'values') and shap_values.values.ndim == 3:
+            # SHAP returns Explanation object with shape (1, 40, 2)
+            shap_values_to_plot = shap_values.values[0, :, 1]  # Select class 1 values
+            expected_value_to_plot = shap_values.base_values[0][1]
         else:
-            # For regression or single-output models, or if only one array is returned
-            shap_values_to_plot = shap_values[0] # Get SHAP values for the first instance
+            # Fallback for regression or unusual case
+            shap_values_to_plot = shap_values[0]
             expected_value_to_plot = explainer.expected_value
-
 
         # --- SHAP Waterfall Plot ---
         st.markdown("#### How individual features push the prediction from the base value to the output")
-        # Create a Matplotlib figure explicitly
         fig_waterfall = plt.figure(figsize=(12, 8))
-        
-        # Create a SHAP Explanation object for the waterfall plot
+
         shap_explanation = shap.Explanation(
             values=shap_values_to_plot,
             base_values=expected_value_to_plot,
-            data=input_encoded.iloc[0], # Pass the actual input data for features
-            feature_names=feature_columns # Use the loaded feature names
+            data=input_encoded.iloc[0],
+            feature_names=feature_columns
         )
-        
-        # Call shap.plots.waterfall. It will draw on the currently active Matplotlib figure.
-        shap.plots.waterfall(shap_explanation, show=False) # show=False prevents it from calling plt.show()
-        
-        st.pyplot(fig_waterfall, use_container_width=True)
-        plt.clf() # Clear the current figure
-        plt.close(fig_waterfall) # Close the figure to free memory
 
+        shap.plots.waterfall(shap_explanation, show=False)
+        st.pyplot(fig_waterfall, use_container_width=True)
+        plt.clf()
+        plt.close(fig_waterfall)
 
         # --- SHAP Summary Plot (Bar) ---
         st.markdown("#### Overall impact of features on the model's output")
-        fig_summary = plt.figure(figsize=(12, 7)) # Create another Matplotlib figure explicitly
-        
+        fig_summary = plt.figure(figsize=(12, 7))
+
         if isinstance(shap_values, list) and len(shap_values) > 1:
-            # For multi-output, use shap_values[1] for positive class
             shap.summary_plot(shap_values[1], shap_background_data, plot_type="bar", show=False)
         else:
             shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False)
-        
+
         st.pyplot(fig_summary, use_container_width=True)
-        plt.clf() # Clear the current figure
-        plt.close(fig_summary) # Close the figure to free memory
+        plt.clf()
+        plt.close(fig_summary)
 
     except Exception as e:
         st.error(f"An error occurred during SHAP explanation: {e}")
