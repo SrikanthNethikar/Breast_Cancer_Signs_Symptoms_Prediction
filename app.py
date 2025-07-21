@@ -220,24 +220,20 @@ if st.button("🔬 Explain Prediction"):
         st.subheader("🔍 SHAP Explanation (Top Features Contributing to Prediction)")
 
         # Initialize SHAP explainer with the trained model and background data
-        explainer = shap.TreeExplainer(model, data=shap_background_data)
+        explainer = shap.Explainer(model, shap_background_data)
 
-        # Calculate SHAP values for the current input
-        shap_values = explainer.shap_values(input_encoded)
+        # Compute SHAP values for the input
+        shap_values = explainer(input_encoded)  # Returns shap.Explanation object
 
-        # --- Select SHAP values for positive class only (Malignant = class 1) ---
-        if isinstance(shap_values, list) and len(shap_values) > 1:
-            # Typical case for binary classification with SHAP list output
-            shap_values_to_plot = shap_values[1][0]  # Class 1, single instance
-            expected_value_to_plot = explainer.expected_value[1]
-        elif hasattr(shap_values, 'values') and shap_values.values.ndim == 3:
-            # SHAP returns Explanation object with shape (1, 40, 2)
-            shap_values_to_plot = shap_values.values[0, :, 1]  # Select class 1 values
+        # --- Select SHAP values for class 1 (Malignant) ---
+        if shap_values.values.ndim == 3:
+            # shape = (1, num_features, num_classes)
+            shap_values_to_plot = shap_values.values[0, :, 1]  # Class 1
             expected_value_to_plot = shap_values.base_values[0][1]
         else:
-            # Fallback for regression or unusual case
-            shap_values_to_plot = shap_values[0]
-            expected_value_to_plot = explainer.expected_value
+            # shape = (1, num_features)
+            shap_values_to_plot = shap_values.values[0]
+            expected_value_to_plot = shap_values.base_values[0]
 
         # --- SHAP Waterfall Plot ---
         st.markdown("#### How individual features push the prediction from the base value to the output")
@@ -258,12 +254,7 @@ if st.button("🔬 Explain Prediction"):
         # --- SHAP Summary Plot (Bar) ---
         st.markdown("#### Overall impact of features on the model's output")
         fig_summary = plt.figure(figsize=(12, 7))
-
-        if isinstance(shap_values, list) and len(shap_values) > 1:
-            shap.summary_plot(shap_values[1], shap_background_data, plot_type="bar", show=False)
-        else:
-            shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False)
-
+        shap.summary_plot(shap_values, shap_background_data, plot_type="bar", show=False)
         st.pyplot(fig_summary, use_container_width=True)
         plt.clf()
         plt.close(fig_summary)
